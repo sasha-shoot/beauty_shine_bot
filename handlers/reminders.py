@@ -1,3 +1,4 @@
+import asyncio
 from aiogram import Router, F
 from aiogram.types import CallbackQuery
 from keyboards import reschedule_confirm_kb
@@ -8,10 +9,23 @@ import texts
 router = Router()
 
 
+async def _delete_after(bot, chat_id: int, message_id: int, delay: int = 600) -> None:
+    """Видаляє повідомлення через delay секунд (за замовчуванням — 10 хв)."""
+    await asyncio.sleep(delay)
+    try:
+        await bot.delete_message(chat_id, message_id)
+    except Exception:
+        pass
+
+
 @router.callback_query(F.data == "remok")
 async def reminder_ok(callback: CallbackQuery):
-    await callback.message.edit_text(texts.REMINDER_OK, parse_mode="HTML")
-    await callback.answer("Дякуємо!")
+    """Клієнт підтвердив візит — прибираємо нагадування з чату."""
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+    await callback.answer("Дякуємо! Чекаємо на вас 💜")
 
 
 @router.callback_query(F.data.startswith("remmv:"))
@@ -22,6 +36,8 @@ async def reminder_move(callback: CallbackQuery):
     booking = await get_booking_by_id(rec_id)
     if not booking:
         await callback.message.edit_text(texts.RESCHEDULE_NOT_FOUND, parse_mode="HTML")
+        asyncio.create_task(_delete_after(
+            callback.bot, callback.message.chat.id, callback.message.message_id))
         await callback.answer()
         return
 
@@ -29,8 +45,11 @@ async def reminder_move(callback: CallbackQuery):
         # м'яке перенесення — без штрафу
         await notify_master_reschedule(callback.bot, booking, penalty=False)
         await callback.message.edit_text(texts.RESCHEDULE_SOFT, parse_mode="HTML")
+        # повідомлення про дзвінок майстра зникне через 10 хв
+        asyncio.create_task(_delete_after(
+            callback.bot, callback.message.chat.id, callback.message.message_id))
     else:
-        # перенесення за <2 год — попередження про штраф
+        # перенесення за <2 год — попередження про штраф (лишається до рішення)
         await callback.message.edit_text(
             texts.reschedule_penalty_warn(booking),
             reply_markup=reschedule_confirm_kb(rec_id),
@@ -46,10 +65,16 @@ async def reminder_penalty_confirm(callback: CallbackQuery):
     if booking:
         await notify_master_reschedule(callback.bot, booking, penalty=True)
     await callback.message.edit_text(texts.RESCHEDULE_PENALTY_DONE, parse_mode="HTML")
+    asyncio.create_task(_delete_after(
+        callback.bot, callback.message.chat.id, callback.message.message_id))
     await callback.answer()
 
 
 @router.callback_query(F.data == "rempencancel")
 async def reminder_penalty_cancel(callback: CallbackQuery):
-    await callback.message.edit_text(texts.RESCHEDULE_CANCELLED, parse_mode="HTML")
-    await callback.answer()
+    """Клієнт передумав переносити — лишає запис, прибираємо нагадування."""
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+    await callback.answer("Добре, чекаємо на вас 💜")

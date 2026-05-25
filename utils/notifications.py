@@ -105,18 +105,21 @@ async def notify_ivan_ai_alert(
 
 # ── Гео-картка салону ─────────────────────────────────────
 async def send_location_card(bot: Bot, chat_id: int) -> None:
-    """Надсилає клієнту локацію салону після підтвердження запису."""
+    """Надсилає клієнту локацію салону після підтвердження запису.
+    Точка на карті — першою, текстова картка з кнопкою «На початок» — останньою."""
     from config import SALON_LAT, SALON_LNG, SALON_ADDRESS, SALON_PHONE
+    from keyboards import back_to_menu_kb
     import texts
     try:
+        await bot.send_location(chat_id, latitude=SALON_LAT, longitude=SALON_LNG)
         maps_link = f"https://www.google.com/maps/search/?api=1&query={SALON_LAT},{SALON_LNG}"
         await bot.send_message(
             chat_id,
             texts.geo_card(SALON_ADDRESS, SALON_PHONE, maps_link),
             parse_mode="HTML",
             disable_web_page_preview=True,
+            reply_markup=back_to_menu_kb(),
         )
-        await bot.send_location(chat_id, latitude=SALON_LAT, longitude=SALON_LNG)
     except Exception as e:
         logger.error(f"send_location_card error: {e}")
 
