@@ -3,7 +3,9 @@ import logging
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 from config import BOT_TOKEN
-from handlers import start, master, manicure, pedicure, ai_helper, callback_req
+from handlers import (start, master, manicure, pedicure,
+                      ai_helper, callback_req, reminders)
+from utils.scheduler import reminder_loop
 
 logging.basicConfig(
     level=logging.INFO,
@@ -18,13 +20,18 @@ async def main():
 
     dp.include_router(start.router)
     dp.include_router(master.router)
+    dp.include_router(reminders.router)
     dp.include_router(manicure.router)
     dp.include_router(pedicure.router)
     dp.include_router(ai_helper.router)
     dp.include_router(callback_req.router)
 
-    logger.info("Beauty & Shine bot started (v2 - Етап 3) ✅")
+    logger.info("Beauty & Shine bot started (v2 - Етап 4) ✅")
     await bot.delete_webhook(drop_pending_updates=True)
+
+    # фоновий планувальник нагадувань
+    asyncio.create_task(reminder_loop(bot))
+
     await dp.start_polling(bot)
 
 

@@ -265,3 +265,19 @@ def client_discounts_kb() -> InlineKeyboardMarkup:
     b.button(text="↩ Головне меню", callback_data="go:menu")
     b.adjust(1)
     return b.as_markup()
+
+
+# ══ НАГАДУВАННЯ — ЕТАП 4Б ════════════════════════════════
+def reminder_kb(rec_id: str, kind: str) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="✅ Дякую, буду",      callback_data="remok")
+    b.button(text="🔄 Перенести запис",  callback_data=f"remmv:{rec_id}:{kind}")
+    b.adjust(1)
+    return b.as_markup()
+
+def reschedule_confirm_kb(rec_id: str) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="✅ Так, перенести", callback_data=f"rempen:{rec_id}")
+    b.button(text="❌ Ні, залишити",   callback_data="rempencancel")
+    b.adjust(1)
+    return b.as_markup()

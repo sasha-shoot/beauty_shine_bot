@@ -272,3 +272,60 @@ MASTER_AI_THINKING = "🤔 Думаю..."
 
 def master_ai_answer(answer: str) -> str:
     return f"🤖 {answer}"
+
+
+# ══ НАГАДУВАННЯ — ЕТАП 4Б ════════════════════════════════
+def reminder_text(bk: dict, kind: str) -> str:
+    from datetime import date as _date
+    from data import UA_MONTHS_FULL
+    icon = "💅" if bk["service"] == "Манікюр" else "🦶"
+    detail = bk.get("details") or bk["service"]
+    try:
+        dt = _date.fromisoformat(bk["date"])
+        date_ua = f"{dt.day} {UA_MONTHS_FULL[dt.month]}"
+    except Exception:
+        date_ua = bk["date"]
+    head = ("Нагадуємо про ваш запис 💜" if kind == "24"
+            else "⏰ За 2 години — ваш запис!")
+    return (
+        f"⏰ <b>Нагадування</b>\n\n"
+        f"{head}\n\n"
+        f"{icon} {detail}\n"
+        f"📅 {date_ua} о {bk['time']}\n\n"
+        f"Підтвердіть, будь ласка, що будете 👇"
+    )
+
+REMINDER_OK = "Дякуємо, що підтвердили! Чекаємо на вас 💜"
+
+RESCHEDULE_SOFT = (
+    "🔄 <b>Запит на перенесення прийнято</b>\n\n"
+    "Майстер зателефонує вам найближчим часом, щоб підібрати нову зручну дату.\n\n"
+    "До зв'язку! 💜"
+)
+
+def reschedule_penalty_warn(booking: dict) -> str:
+    price = booking.get("price", "")
+    try:
+        penalty = round(int(price) * 0.5)
+        pen_str = f"<b>{penalty} грн</b> (50% вартості цього запису)"
+    except (ValueError, TypeError):
+        pen_str = "<b>+50%</b> від вартості цього візиту (майстер уточнить суму)"
+    return (
+        "⚠️ <b>Перенесення менш ніж за 2 години</b>\n\n"
+        "На жаль, за такий короткий час майстер уже не встигне "
+        "запропонувати це вікно іншому клієнту.\n\n"
+        f"<b>Умова перенесення:</b> наступний візит — звичайна вартість + {pen_str}.\n\n"
+        "Майстер зателефонує для узгодження нової дати.\n\n"
+        "Підтверджуєте перенесення на цих умовах?"
+    )
+
+RESCHEDULE_PENALTY_DONE = (
+    "🔄 <b>Перенесення прийнято</b>\n\n"
+    "Майстер зателефонує вам найближчим часом для вибору нової дати.\n\n"
+    "Дякуємо за розуміння 💜"
+)
+RESCHEDULE_CANCELLED = "Добре, лишаємо запис без змін. Чекаємо на вас! 💜"
+RESCHEDULE_NOT_FOUND = (
+    "Не вдалося знайти ваш запис. Будь ласка, зателефонуйте нам — "
+    "ми все вирішимо 📞"
+)

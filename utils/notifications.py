@@ -119,3 +119,38 @@ async def send_location_card(bot: Bot, chat_id: int) -> None:
         await bot.send_location(chat_id, latitude=SALON_LAT, longitude=SALON_LNG)
     except Exception as e:
         logger.error(f"send_location_card error: {e}")
+
+
+# ── Сповіщення майстру про перенесення ───────────────────
+async def notify_master_reschedule(bot: Bot, booking: dict, penalty: bool) -> None:
+    """Повідомляє майстра що клієнт переносить запис."""
+    from config import IRINA_CHAT_ID, IVAN_CHAT_ID
+    service = booking.get("service", "")
+    if service == "Манікюр":
+        chat_id, icon = IRINA_CHAT_ID, "💅"
+    else:
+        chat_id, icon = IVAN_CHAT_ID, "🦶"
+
+    pen_line = ""
+    if penalty:
+        price = booking.get("price", "")
+        try:
+            pen_sum = round(int(price) * 0.5)
+            pen_line = (f"\n\n⚠️ <b>Пізнє перенесення (&lt;2 год).</b>\n"
+                        f"Застосувати до наступного візиту: +{pen_sum} грн (50%).")
+        except (ValueError, TypeError):
+            pen_line = ("\n\n⚠️ <b>Пізнє перенесення (&lt;2 год).</b>\n"
+                        "Застосувати +50% до наступного візиту.")
+
+    text = (
+        f"🔄 <b>Клієнт переносить запис</b>\n\n"
+        f"{icon} {service}\n"
+        f"👤 {booking.get('name', '—')} {booking.get('username', '')}\n"
+        f"📅 Було записано: {booking.get('date')} о {booking.get('time')}"
+        f"{pen_line}\n\n"
+        f"📞 Зателефонуйте клієнту, щоб підібрати нову дату."
+    )
+    try:
+        await bot.send_message(chat_id, text, parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"notify_master_reschedule error: {e}")

@@ -91,6 +91,7 @@ async def ped_confirm(callback: CallbackQuery, state: FSMContext):
         client_name=user.full_name, client_username=user.username or "",
         service="Педикюр", details="Педикюр медичний + косметичний",
         price="уточнюється", duration="1-2 год", notes=note,
+        chat_id=user.id,
     )
     await notify_ivan_booking(
         bot=callback.bot,

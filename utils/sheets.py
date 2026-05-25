@@ -65,7 +65,8 @@ async def get_bookings_for_date(date_str: str) -> list:
 
 
 async def save_booking(date, time, client_name, client_username, service,
-                       details, price, duration, notes: str = "") -> bool:
+                       details, price, duration, notes: str = "",
+                       chat_id: int = 0) -> bool:
     url = _url("Записи")
     payload = {"records": [{"fields": {
         "Дата": date, "Час": time, "Імʼя": client_name,
@@ -73,6 +74,7 @@ async def save_booking(date, time, client_name, client_username, service,
         "Послуга": service, "Деталі": details,
         "Ціна": str(price), "Тривалість": str(duration),
         "Нотатки ІІ": notes or "—",
+        "ChatID": str(chat_id) if chat_id else "",
     }}]}
     try:
         async with aiohttp.ClientSession() as s:
@@ -269,4 +271,91 @@ async def delete_discount(record_id: str) -> bool:
                 return True
     except Exception as e:
         logger.error(f"delete_discount error: {e}")
+        return False
+
+
+# ══ НАГАДУВАННЯ — ЕТАП 4Б ════════════════════════════════
+async def _fetch_all(table: str) -> list:
+    """Отримати всі записи таблиці з пагінацією."""
+    records = []
+    offset = None
+    try:
+        async with aiohttp.ClientSession() as s:
+            while True:
+                params = "pageSize=100"
+                if offset:
+                    params += f"&offset={offset}"
+                async with s.get(_url(table, params), headers=_headers()) as r:
+                    if r.status != 200:
+                        logger.error(f"_fetch_all {table} {r.status}: {await r.text()}")
+                        break
+                    data = await r.json()
+                    records.extend(data.get("records", []))
+                    offset = data.get("offset")
+                    if not offset:
+                        break
+    except Exception as e:
+        logger.error(f"_fetch_all error: {e}")
+    return records
+
+
+def _norm_booking(rec: dict) -> dict:
+    f = rec.get("fields", {})
+    return {
+        "id": rec["id"],
+        "date": f.get("Дата", ""),
+        "time": f.get("Час", ""),
+        "chat_id": str(f.get("ChatID", "")).strip(),
+        "name": f.get("Імʼя", "—"),
+        "username": f.get("Username", ""),
+        "service": f.get("Послуга", ""),
+        "details": f.get("Деталі", ""),
+        "price": str(f.get("Ціна", "")),
+        "rem24": str(f.get("Нагад24", "")).strip().lower() == "так",
+        "rem2":  str(f.get("Нагад2", "")).strip().lower() == "так",
+    }
+
+
+async def get_upcoming_bookings() -> list:
+    """Майбутні записи (сьогодні+) для планувальника нагадувань."""
+    from datetime import date as _date
+    today = _date.today().isoformat()
+    records = await _fetch_all("Записи")
+    result = []
+    for rec in records:
+        b = _norm_booking(rec)
+        if b["date"] and b["date"] >= today:
+            result.append(b)
+    return result
+
+
+async def get_booking_by_id(record_id: str) -> dict | None:
+    """Один запис за record_id."""
+    url = f"{_url('Записи')}/{record_id}"
+    try:
+        async with aiohttp.ClientSession() as s:
+            async with s.get(url, headers=_headers()) as r:
+                if r.status != 200:
+                    logger.error(f"get_booking_by_id {r.status}: {await r.text()}")
+                    return None
+                return _norm_booking(await r.json())
+    except Exception as e:
+        logger.error(f"get_booking_by_id error: {e}")
+        return None
+
+
+async def mark_reminder_sent(record_id: str, which: str) -> bool:
+    """Позначити що нагадування надіслано. which = '24' або '2'."""
+    field = "Нагад24" if which == "24" else "Нагад2"
+    url = f"{_url('Записи')}/{record_id}"
+    payload = {"fields": {field: "так"}}
+    try:
+        async with aiohttp.ClientSession() as s:
+            async with s.patch(url, headers=_headers(), json=payload) as r:
+                if r.status != 200:
+                    logger.error(f"mark_reminder_sent {r.status}: {await r.text()}")
+                    return False
+                return True
+    except Exception as e:
+        logger.error(f"mark_reminder_sent error: {e}")
         return False

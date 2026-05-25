@@ -134,6 +134,7 @@ async def confirm_booking(callback: CallbackQuery, state: FSMContext):
         client_name=user.full_name, client_username=user.username or "",
         service="Манікюр", details=data["service_detail"],
         price=final_price, duration=data["total_duration"], notes=note,
+        chat_id=user.id,
     )
 
     await notify_irina(
