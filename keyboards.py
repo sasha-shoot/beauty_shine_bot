@@ -1,5 +1,6 @@
 from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+import calendar
 from datetime import date, timedelta
 from data import MANICURE_TYPES, NAIL_LENGTHS, NAIL_SHAPES, TIME_SLOTS, UA_DAYS, UA_MONTHS_SHORT
 
@@ -69,29 +70,47 @@ def nail_shapes_kb() -> InlineKeyboardMarkup:
 
 
 # ── Вибір дати ────────────────────────────────────────────
-def date_picker_kb(booked_dates: set | None = None) -> InlineKeyboardMarkup:
-    """Показує наступні робочі дні (Пн-Сб)."""
-    booked_dates = booked_dates or set()
+
+def _two_months_dates() -> list:
+    """Робочі дні від сьогодні до кінця наступного місяця (без неділь)."""
+    today = date.today()
+    if today.month == 12:
+        ny, nm = today.year + 1, 1
+    else:
+        ny, nm = today.year, today.month + 1
+    last = calendar.monthrange(ny, nm)[1]
+    end = date(ny, nm, last)
+    out, d = [], today
+    while d <= end:
+        if d.weekday() != 6:  # пропускаємо неділі
+            out.append(d)
+        d += timedelta(days=1)
+    return out
+
+
+def date_picker_kb() -> InlineKeyboardMarkup:
+    """Дати від сьогодні до кінця наступного місяця (без неділь)."""
     b = InlineKeyboardBuilder()
     today = date.today()
-    added = 0
-
-    for delta in range(1, 45):
-        d = today + timedelta(days=delta)
-        if d.weekday() == 6:
-            continue
-        if added >= 24:
-            break
-        d_str = d.isoformat()
+    dates = _two_months_dates()
+    has_today = bool(dates) and dates[0] == today
+    if has_today:
+        b.button(text="📅 Сьогодні", callback_data=f"date:{today.isoformat()}")
+        rest = dates[1:]
+    else:
+        rest = dates
+    for d in rest:
         label = f"{UA_DAYS[d.weekday()]} {d.day} {UA_MONTHS_SHORT[d.month]}"
-        if d_str in booked_dates:
-            b.button(text=f"✗ {label}", callback_data="noop")
-        else:
-            b.button(text=label, callback_data=f"date:{d_str}")
-        added += 1
-
+        b.button(text=label, callback_data=f"date:{d.isoformat()}")
     b.button(text="↩ Назад", callback_data="go:menu")
-    b.adjust(3)
+    n = len(rest)
+    rows = [3] * (n // 3)
+    if n % 3:
+        rows.append(n % 3)
+    if has_today:
+        b.adjust(1, *rows, 1)
+    else:
+        b.adjust(*rows, 1)
     return b.as_markup()
 
 
@@ -157,25 +176,28 @@ def master_service_kb() -> InlineKeyboardMarkup:
 
 
 def master_date_kb(prefix: str) -> InlineKeyboardMarkup:
-    """Вибір дати для майстра. prefix — префікс callback (histdate / wmdate)."""
+    """Вибір дати для майстра — до кінця наступного місяця."""
     b = InlineKeyboardBuilder()
     today = date.today()
-    b.button(text="📅 Сьогодні", callback_data=f"{prefix}:{today.isoformat()}")
-    added = 0
-    for delta in range(1, 50):
-        d = today + timedelta(days=delta)
-        if d.weekday() == 6:
-            continue
-        if added >= 21:
-            break
+    dates = _two_months_dates()
+    has_today = bool(dates) and dates[0] == today
+    if has_today:
+        b.button(text="📅 Сьогодні", callback_data=f"{prefix}:{today.isoformat()}")
+        rest = dates[1:]
+    else:
+        rest = dates
+    for d in rest:
         label = f"{UA_DAYS[d.weekday()]} {d.day} {UA_MONTHS_SHORT[d.month]}"
         b.button(text=label, callback_data=f"{prefix}:{d.isoformat()}")
-        added += 1
     b.button(text="↩ Назад", callback_data="master:menu")
-    date_rows = [3] * (added // 3)
-    if added % 3:
-        date_rows.append(added % 3)
-    b.adjust(1, *date_rows, 1)
+    n = len(rest)
+    rows = [3] * (n // 3)
+    if n % 3:
+        rows.append(n % 3)
+    if has_today:
+        b.adjust(1, *rows, 1)
+    else:
+        b.adjust(*rows, 1)
     return b.as_markup()
 
 

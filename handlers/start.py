@@ -1,46 +1,74 @@
+import os
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, FSInputFile
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
-from keyboards import role_select_kb, main_menu_kb
+from keyboards import role_select_kb, main_menu_kb, client_discounts_kb
 from utils.settings import is_maintenance
 import texts
 
 router = Router()
 
+BANNER_PATH = "assets/welcome_banner.jpg"
+
+
+async def _present(callback: CallbackQuery, text: str, markup=None):
+    """Якщо попереднє повідомлення — фото (банер), видаляємо і шлемо нове.
+    Якщо звичайний текст — оновлюємо на місці. Так у чаті завжди один активний екран."""
+    if callback.message.photo:
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+        await callback.message.answer(text, reply_markup=markup, parse_mode="HTML")
+    else:
+        await callback.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
+
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext):
     await state.clear()
-    await message.answer(texts.ROLE_SELECT, reply_markup=role_select_kb(), parse_mode="HTML")
-
-
-async def _show_client_menu(callback: CallbackQuery):
-    """Показує меню клієнта або повідомлення про тех-роботи."""
-    if is_maintenance():
-        await callback.message.edit_text(texts.MAINTENANCE, parse_mode="HTML")
+    if os.path.exists(BANNER_PATH):
+        await message.answer_photo(
+            photo=FSInputFile(BANNER_PATH),
+            caption=texts.WELCOME_BANNER_CAPTION,
+            reply_markup=role_select_kb(),
+            parse_mode="HTML",
+        )
     else:
-        await callback.message.edit_text(texts.WELCOME, reply_markup=main_menu_kb(), parse_mode="HTML")
+        # Резервний варіант, якщо банер не знайдено
+        await message.answer(
+            texts.WELCOME_BANNER_CAPTION,
+            reply_markup=role_select_kb(),
+            parse_mode="HTML",
+        )
 
 
 @router.callback_query(F.data == "role:client")
 async def role_client(callback: CallbackQuery, state: FSMContext):
     await state.clear()
-    await _show_client_menu(callback)
+    if is_maintenance():
+        await _present(callback, texts.MAINTENANCE, None)
+    else:
+        await _present(callback, texts.WELCOME, main_menu_kb())
     await callback.answer()
 
 
 @router.callback_query(F.data == "go:menu")
 async def go_menu(callback: CallbackQuery, state: FSMContext):
     await state.clear()
-    await _show_client_menu(callback)
+    if is_maintenance():
+        await _present(callback, texts.MAINTENANCE, None)
+    else:
+        await _present(callback, texts.WELCOME, main_menu_kb())
     await callback.answer()
 
 
 @router.callback_query(F.data == "go:start")
 async def go_start(callback: CallbackQuery, state: FSMContext):
     await state.clear()
-    await callback.message.edit_text(texts.ROLE_SELECT, reply_markup=role_select_kb(), parse_mode="HTML")
+    # «На початок» — текстова версія, без банера (банер тільки для /start)
+    await _present(callback, texts.ROLE_SELECT, role_select_kb())
     await callback.answer()
 
 
@@ -52,12 +80,11 @@ async def noop(callback: CallbackQuery):
 @router.callback_query(F.data == "svc:discounts")
 async def client_discounts(callback: CallbackQuery, state: FSMContext):
     from utils.sheets import get_discounts
-    from keyboards import client_discounts_kb
     await state.clear()
     discounts = await get_discounts()
-    await callback.message.edit_text(
+    await _present(
+        callback,
         texts.client_discounts_text(discounts),
-        reply_markup=client_discounts_kb(),
-        parse_mode="HTML",
+        client_discounts_kb(),
     )
     await callback.answer()

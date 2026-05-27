@@ -26,7 +26,7 @@ async def main():
     dp.include_router(ai_helper.router)
     dp.include_router(callback_req.router)
 
-    logger.info("Beauty & Shine bot started (v2 - Етап 4) ✅")
+    logger.info("Beauty & Shine bot started (v2 - фіналізовано) ✅")
     await bot.delete_webhook(drop_pending_updates=True)
 
     # фоновий планувальник нагадувань

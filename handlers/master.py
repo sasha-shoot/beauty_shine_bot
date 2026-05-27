@@ -24,7 +24,15 @@ def _date_ua(date_str: str) -> str:
 @router.callback_query(F.data == "role:master")
 async def role_master(callback: CallbackQuery, state: FSMContext):
     await state.set_state(MasterAuth.entering_password)
-    await callback.message.edit_text(texts.MASTER_PASSWORD_PROMPT, parse_mode="HTML")
+    # якщо попереднє повідомлення — банер (фото), видаляємо й шлемо новий запит
+    if callback.message.photo:
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+        await callback.message.answer(texts.MASTER_PASSWORD_PROMPT, parse_mode="HTML")
+    else:
+        await callback.message.edit_text(texts.MASTER_PASSWORD_PROMPT, parse_mode="HTML")
     await callback.answer()
 
 
