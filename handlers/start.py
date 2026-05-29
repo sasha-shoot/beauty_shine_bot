@@ -1,30 +1,64 @@
+"""Стартовий хаб бота: /start, команди, головне меню клієнта, перемикач ролей.
+Reply-клавіатура (нижнє меню) — це глобальна навігація, як у Westelecom.
+Кнопки меню перехоплюються тут ПЕРШИМИ (роутер реєструється першим у bot.py),
+тому вони працюють як «escape hatch» з будь-якого стану."""
 import os
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, FSInputFile
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
-from keyboards import role_select_kb, main_menu_kb, client_discounts_kb
+from keyboards import (
+    role_reply_kb, client_reply_kb, remove_kb, BTN,
+    manicure_types_kb, pedicure_start_kb,
+)
+from states import ManicureFlow, PedicureFlow, AIHelperFlow, CallbackFlow
 from utils.settings import is_maintenance
+from utils.sheets import get_client_profile, get_discounts
 import texts
 
 router = Router()
 
-BANNER_PATH = "assets/welcome_banner.jpg"
+BANNER_PATH      = "assets/welcome_banner.jpg"
+MAIN_MENU_PATH   = "assets/main_menu.jpg"
+MAINTENANCE_PATH = "assets/maintenance.jpg"
+IRINA_PATH       = "assets/master_irina.jpg"
+IVAN_PATH        = "assets/master_ivan.jpg"
 
 
-async def _present(callback: CallbackQuery, text: str, markup=None):
-    """Якщо попереднє повідомлення — фото (банер), видаляємо і шлемо нове.
-    Якщо звичайний текст — оновлюємо на місці. Так у чаті завжди один активний екран."""
-    if callback.message.photo:
-        try:
-            await callback.message.delete()
-        except Exception:
-            pass
-        await callback.message.answer(text, reply_markup=markup, parse_mode="HTML")
+# ── Допоміжні: показ тех-режиму, головного меню ──────────
+async def _show_maintenance(message: Message):
+    """Текст + картинка тех-режиму."""
+    if os.path.exists(MAINTENANCE_PATH):
+        await message.answer_photo(
+            photo=FSInputFile(MAINTENANCE_PATH),
+            caption=texts.MAINTENANCE,
+            reply_markup=remove_kb(),
+            parse_mode="HTML",
+        )
     else:
-        await callback.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
+        await message.answer(texts.MAINTENANCE, reply_markup=remove_kb(), parse_mode="HTML")
 
 
+async def show_client_menu(message: Message, state: FSMContext):
+    """Показує клієнтське меню з персоналізацією (для повторних клієнтів)."""
+    await state.clear()
+    if is_maintenance():
+        await _show_maintenance(message)
+        return
+    profile = await get_client_profile(message.chat.id)
+    caption = texts.client_menu_text(profile)
+    if os.path.exists(MAIN_MENU_PATH):
+        await message.answer_photo(
+            photo=FSInputFile(MAIN_MENU_PATH),
+            caption=caption,
+            reply_markup=client_reply_kb(),
+            parse_mode="HTML",
+        )
+    else:
+        await message.answer(caption, reply_markup=client_reply_kb(), parse_mode="HTML")
+
+
+# ══ /start ═════════════════════════════════════════════
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext):
     await state.clear()
@@ -32,43 +66,139 @@ async def cmd_start(message: Message, state: FSMContext):
         await message.answer_photo(
             photo=FSInputFile(BANNER_PATH),
             caption=texts.WELCOME_BANNER_CAPTION,
-            reply_markup=role_select_kb(),
+            reply_markup=role_reply_kb(),
             parse_mode="HTML",
         )
     else:
-        # Резервний варіант, якщо банер не знайдено
         await message.answer(
             texts.WELCOME_BANNER_CAPTION,
-            reply_markup=role_select_kb(),
+            reply_markup=role_reply_kb(),
             parse_mode="HTML",
         )
 
 
-@router.callback_query(F.data == "role:client")
-async def role_client(callback: CallbackQuery, state: FSMContext):
+# ══ Кнопки ролей (нижнє меню) ══════════════════════════
+@router.message(F.text == BTN["client"])
+async def btn_client(message: Message, state: FSMContext):
+    await show_client_menu(message, state)
+
+
+@router.message(F.text == BTN["home"])
+async def btn_home(message: Message, state: FSMContext):
     await state.clear()
+    await message.answer(
+        texts.ROLE_SELECT,
+        reply_markup=role_reply_kb(),
+        parse_mode="HTML",
+    )
+
+
+# ══ Кнопки головного меню → старт відповідного флоу ════
+async def _check_maint_or(message: Message) -> bool:
+    """True якщо тех-режим (вже показали повідомлення). Інакше False."""
     if is_maintenance():
-        await _present(callback, texts.MAINTENANCE, None)
+        await _show_maintenance(message)
+        return True
+    return False
+
+
+@router.message(F.text == BTN["manicure"])
+async def btn_manicure(message: Message, state: FSMContext):
+    if await _check_maint_or(message):
+        return
+    await state.clear()
+    await state.set_state(ManicureFlow.choosing_type)
+    if os.path.exists(IRINA_PATH):
+        await message.answer_photo(
+            photo=FSInputFile(IRINA_PATH),
+            caption=texts.MANICURE_INTRO,
+            reply_markup=manicure_types_kb(),
+            parse_mode="HTML",
+        )
     else:
-        await _present(callback, texts.WELCOME, main_menu_kb())
-    await callback.answer()
+        await message.answer(
+            texts.MANICURE_INTRO,
+            reply_markup=manicure_types_kb(),
+            parse_mode="HTML",
+        )
 
 
+@router.message(F.text == BTN["pedicure"])
+async def btn_pedicure(message: Message, state: FSMContext):
+    if await _check_maint_or(message):
+        return
+    await state.clear()
+    await state.set_state(PedicureFlow.choosing_action)
+    if os.path.exists(IVAN_PATH):
+        await message.answer_photo(
+            photo=FSInputFile(IVAN_PATH),
+            caption=texts.PEDICURE_INTRO,
+            reply_markup=pedicure_start_kb(),
+            parse_mode="HTML",
+        )
+    else:
+        await message.answer(
+            texts.PEDICURE_INTRO,
+            reply_markup=pedicure_start_kb(),
+            parse_mode="HTML",
+        )
+
+
+@router.message(F.text == BTN["ai"])
+async def btn_ai(message: Message, state: FSMContext):
+    if await _check_maint_or(message):
+        return
+    await state.set_state(AIHelperFlow.describing)
+    await message.answer(texts.AI_INTRO, parse_mode="HTML")
+
+
+@router.message(F.text == BTN["call"])
+async def btn_call(message: Message, state: FSMContext):
+    if await _check_maint_or(message):
+        return
+    await state.set_state(CallbackFlow.entering_phone)
+    await message.answer(texts.CALLBACK_INTRO, parse_mode="HTML")
+
+
+@router.message(F.text == BTN["sale"])
+async def btn_sale(message: Message, state: FSMContext):
+    if await _check_maint_or(message):
+        return
+    await state.clear()
+    discounts = await get_discounts()
+    await message.answer(
+        texts.client_discounts_text(discounts),
+        parse_mode="HTML",
+    )
+
+
+# ══ Команди (швидкий запуск з меню «/») ════════════════
+@router.message(Command("ai"))
+async def cmd_ai(message: Message, state: FSMContext):
+    await btn_ai(message, state)
+
+
+@router.message(Command("skidky"))
+async def cmd_skidky(message: Message, state: FSMContext):
+    await btn_sale(message, state)
+
+
+@router.message(Command("zapys"))
+async def cmd_zapys(message: Message, state: FSMContext):
+    await show_client_menu(message, state)
+
+
+@router.message(Command("help"))
+async def cmd_help(message: Message, state: FSMContext):
+    await message.answer(texts.HELP_TEXT, parse_mode="HTML")
+
+
+# ══ Callback-навігація (для inline-кнопок у флоу) ══════
 @router.callback_query(F.data == "go:menu")
-async def go_menu(callback: CallbackQuery, state: FSMContext):
+async def cb_go_menu(callback: CallbackQuery, state: FSMContext):
     await state.clear()
-    if is_maintenance():
-        await _present(callback, texts.MAINTENANCE, None)
-    else:
-        await _present(callback, texts.WELCOME, main_menu_kb())
-    await callback.answer()
-
-
-@router.callback_query(F.data == "go:start")
-async def go_start(callback: CallbackQuery, state: FSMContext):
-    await state.clear()
-    # «На початок» — текстова версія, без банера (банер тільки для /start)
-    await _present(callback, texts.ROLE_SELECT, role_select_kb())
+    # головне меню — нове повідомлення (бо попереднє могло бути фото з caption)
+    await show_client_menu(callback.message, state)
     await callback.answer()
 
 
@@ -77,14 +207,42 @@ async def noop(callback: CallbackQuery):
     await callback.answer()
 
 
-@router.callback_query(F.data == "svc:discounts")
-async def client_discounts(callback: CallbackQuery, state: FSMContext):
-    from utils.sheets import get_discounts
+# Legacy svc:* callbacks — для inline-входів з інших місць
+@router.callback_query(F.data == "svc:manicure")
+async def cb_svc_manicure(callback: CallbackQuery, state: FSMContext):
     await state.clear()
-    discounts = await get_discounts()
-    await _present(
-        callback,
-        texts.client_discounts_text(discounts),
-        client_discounts_kb(),
-    )
+    await state.set_state(ManicureFlow.choosing_type)
+    if os.path.exists(IRINA_PATH):
+        await callback.message.answer_photo(
+            photo=FSInputFile(IRINA_PATH),
+            caption=texts.MANICURE_INTRO,
+            reply_markup=manicure_types_kb(),
+            parse_mode="HTML",
+        )
+    else:
+        await callback.message.answer(
+            texts.MANICURE_INTRO,
+            reply_markup=manicure_types_kb(),
+            parse_mode="HTML",
+        )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "svc:pedicure")
+async def cb_svc_pedicure(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await state.set_state(PedicureFlow.choosing_action)
+    if os.path.exists(IVAN_PATH):
+        await callback.message.answer_photo(
+            photo=FSInputFile(IVAN_PATH),
+            caption=texts.PEDICURE_INTRO,
+            reply_markup=pedicure_start_kb(),
+            parse_mode="HTML",
+        )
+    else:
+        await callback.message.answer(
+            texts.PEDICURE_INTRO,
+            reply_markup=pedicure_start_kb(),
+            parse_mode="HTML",
+        )
     await callback.answer()

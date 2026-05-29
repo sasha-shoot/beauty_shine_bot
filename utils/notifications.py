@@ -18,19 +18,15 @@ async def notify_irina(
     service_detail: str,
     date: str,
     time: str,
-    price: int,
-    duration: str,
     discount: int = 0,
 ) -> None:
     """Новий запис на манікюр → Ірина."""
-    disc_line = f"\n🎁 Знижка: −{discount}% (вартість вже з урахуванням)" if discount > 0 else ""
+    disc_line = f"\n🎁 Знижка: −{discount}% — врахувати при розрахунку" if discount > 0 else ""
     text = (
         f"💅 <b>Новий запис на манікюр</b>\n\n"
         f"👤 Клієнт: {_tg_link(client_name, client_username)}\n"
         f"📋 Послуга: {service_detail}\n"
-        f"📅 Дата: {date} о {time}\n"
-        f"⏱ Тривалість: ~{duration}\n"
-        f"💰 Вартість: {price} грн{disc_line}"
+        f"📅 Дата: {date} о {time}{disc_line}"
     )
     try:
         await bot.send_message(IRINA_CHAT_ID, text, parse_mode="HTML")
@@ -69,7 +65,7 @@ async def notify_ivan_callback(
     ai_flag: bool = False,
 ) -> None:
     """Заявка на дзвінок → Іван."""
-    flag = "⚠️ <b>Зверніть увагу: ІІ-помічник виявив симптоми</b>\n\n" if ai_flag else ""
+    flag = "⚠️ <b>Зверніть увагу: ШІ-помічник виявив симптоми</b>\n\n" if ai_flag else ""
     text = (
         f"📞 <b>Заявка на дзвінок</b>\n\n"
         f"{flag}"
@@ -90,12 +86,12 @@ async def notify_ivan_ai_alert(
     symptom: str,
     ai_summary: str,
 ) -> None:
-    """ІІ виявив медичну проблему → Іван."""
+    """ШІ виявив медичну проблему → Іван."""
     text = (
-        f"🚨 <b>ІІ-помічник: зверніть увагу</b>\n\n"
+        f"🚨 <b>ШІ-помічник: зверніть увагу</b>\n\n"
         f"👤 Клієнт: {_tg_link(client_name, client_username)}\n\n"
         f"💬 <b>Скарга:</b> {symptom}\n\n"
-        f"🤖 <b>Аналіз ІІ:</b> {ai_summary}"
+        f"🤖 <b>Аналіз ШІ:</b> {ai_summary}"
     )
     try:
         await bot.send_message(IVAN_CHAT_ID, text, parse_mode="HTML")
@@ -136,14 +132,8 @@ async def notify_master_reschedule(bot: Bot, booking: dict, penalty: bool) -> No
 
     pen_line = ""
     if penalty:
-        price = booking.get("price", "")
-        try:
-            pen_sum = round(int(price) * 0.5)
-            pen_line = (f"\n\n⚠️ <b>Пізнє перенесення (&lt;2 год).</b>\n"
-                        f"Застосувати до наступного візиту: +{pen_sum} грн (50%).")
-        except (ValueError, TypeError):
-            pen_line = ("\n\n⚠️ <b>Пізнє перенесення (&lt;2 год).</b>\n"
-                        "Застосувати +50% до наступного візиту.")
+        pen_line = ("\n\n⚠️ <b>Пізнє перенесення (&lt;2 год).</b>\n"
+                    "Застосувати +50% до наступного візиту.")
 
     text = (
         f"🔄 <b>Клієнт переносить запис</b>\n\n"

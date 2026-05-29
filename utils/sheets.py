@@ -60,6 +60,35 @@ async def get_booked_times(date_str: str, service: str | None = None) -> set:
         return set()
 
 
+async def get_client_profile(chat_id) -> dict | None:
+    """Профіль клієнта за ChatID: імʼя, к-сть візитів, останній візит."""
+    if not chat_id:
+        return None
+    formula = urllib.parse.quote(f"{{ChatID}}='{chat_id}'")
+    url = _url("Записи", f"filterByFormula={formula}")
+    try:
+        s = await _get_session()
+        async with s.get(url, headers=_headers()) as r:
+            if r.status != 200:
+                return None
+            data = await r.json()
+            recs = data.get("records", [])
+            if not recs:
+                return None
+            items = [rec.get("fields", {}) for rec in recs]
+            items.sort(key=lambda x: (x.get("Дата", ""), x.get("Час", "")), reverse=True)
+            last = items[0]
+            return {
+                "name": last.get("Імʼя", ""),
+                "visits": len(items),
+                "last_date": last.get("Дата", ""),
+                "last_service": last.get("Послуга", ""),
+            }
+    except Exception as e:
+        logger.error(f"get_client_profile error: {e}")
+        return None
+
+
 async def get_bookings_for_date(date_str: str) -> list:
     formula = urllib.parse.quote(f"{{Дата}}='{date_str}'")
     url = _url("Записи", f"filterByFormula={formula}")

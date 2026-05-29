@@ -17,7 +17,7 @@ MASTER_PASSWORD: str = os.getenv("MASTER_PASSWORD", "Sarluchanu")
 
 # ── Локація салону ────────────────────────────────────────
 # Координати взяти з Google Maps: правий клік на точці → координати
-SALON_LAT:     float = float(os.getenv("SALON_LAT", "45.3519"))
-SALON_LNG:     float = float(os.getenv("SALON_LNG", "28.8414"))
+SALON_LAT:     float = float(os.getenv("SALON_LAT", "45.354524007391085"))
+SALON_LNG:     float = float(os.getenv("SALON_LNG", "28.82962042698601"))
 SALON_ADDRESS: str   = os.getenv("SALON_ADDRESS", "ТЦ «Дельта», 2 поверх, Ізмаїл")
 SALON_PHONE:   str   = os.getenv("SALON_PHONE", "+380 67 000 00 00")

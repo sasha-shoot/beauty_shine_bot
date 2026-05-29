@@ -1,18 +1,31 @@
+"""Майстер-флоу. Reply-клавіатура для головних дій + inline для sub-флоу.
+Авторизація — через MASTER_PASSWORD, кешується в _authed (поки бот живий)."""
 from datetime import date
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
-from states import MasterAuth, MasterFlow
-from keyboards import (master_menu_kb, master_service_kb, master_date_kb,
-                       slot_grid_kb, back_to_master_kb)
-from config import MASTER_PASSWORD
+from states import MasterAuth, MasterFlow, DiscountFlow, MasterAIFlow
+from keyboards import (
+    BTN, master_reply_kb, remove_kb,
+    master_service_kb, master_date_kb, slot_grid_kb,
+    discount_menu_kb, discount_service_kb, discount_time_kb,
+    discount_percent_kb, discount_list_kb,
+)
+from config import MASTER_PASSWORD, ANTHROPIC_API_KEY
 from data import TIME_SLOTS, UA_MONTHS_FULL
 from utils.settings import is_maintenance, set_maintenance
-from utils.sheets import (get_bookings_for_date, get_blocked_for_service,
-                          get_booked_times, save_blocked_slots)
+from utils.sheets import (
+    get_bookings_for_date, get_blocked_for_service,
+    get_booked_times, save_blocked_slots,
+    get_available_times, add_discount, get_discounts, delete_discount,
+)
+import anthropic
 import texts
 
 router = Router()
+
+# Сесійний набір автентифікованих майстрів (зберігається до перезапуску бота).
+_authed: set[int] = set()
 
 
 def _date_ua(date_str: str) -> str:
@@ -20,69 +33,87 @@ def _date_ua(date_str: str) -> str:
     return f"{d.day} {UA_MONTHS_FULL[d.month]}"
 
 
-# ══ АВТОРИЗАЦІЯ ══════════════════════════════════════════
-@router.callback_query(F.data == "role:master")
-async def role_master(callback: CallbackQuery, state: FSMContext):
-    await state.set_state(MasterAuth.entering_password)
-    # якщо попереднє повідомлення — банер (фото), видаляємо й шлемо новий запит
-    if callback.message.photo:
-        try:
-            await callback.message.delete()
-        except Exception:
-            pass
-        await callback.message.answer(texts.MASTER_PASSWORD_PROMPT, parse_mode="HTML")
+def _is_authed(message_or_callback) -> bool:
+    """Перевірка автентифікації за chat_id."""
+    if isinstance(message_or_callback, CallbackQuery):
+        cid = message_or_callback.from_user.id
     else:
-        await callback.message.edit_text(texts.MASTER_PASSWORD_PROMPT, parse_mode="HTML")
-    await callback.answer()
+        cid = message_or_callback.chat.id
+    return cid in _authed
+
+
+async def _show_master_panel(message: Message):
+    """Надсилає панель майстра з reply-клавіатурою."""
+    await message.answer(
+        texts.master_menu_text(is_maintenance()),
+        reply_markup=master_reply_kb(),
+        parse_mode="HTML",
+    )
+
+
+# ═══════════════════════════════════════════════════════════
+# АВТОРИЗАЦІЯ
+# ═══════════════════════════════════════════════════════════
+@router.message(F.text == BTN["master"])
+async def btn_master(message: Message, state: FSMContext):
+    await state.clear()
+    if message.chat.id in _authed:
+        # Уже авторизований — одразу панель
+        await _show_master_panel(message)
+        return
+    await state.set_state(MasterAuth.entering_password)
+    await message.answer(
+        texts.MASTER_PASSWORD_PROMPT,
+        reply_markup=remove_kb(),  # ховаємо клавіатуру для безпечного вводу
+        parse_mode="HTML",
+    )
 
 
 @router.message(MasterAuth.entering_password)
 async def check_password(message: Message, state: FSMContext):
     if (message.text or "").strip() == MASTER_PASSWORD:
+        _authed.add(message.chat.id)
         await state.clear()
-        await message.answer(
-            texts.master_menu_text(is_maintenance()),
-            reply_markup=master_menu_kb(is_maintenance()),
-            parse_mode="HTML",
-        )
+        await _show_master_panel(message)
     else:
         await message.answer(texts.MASTER_WRONG_PASSWORD, parse_mode="HTML")
 
 
-# ══ ПАНЕЛЬ МАЙСТРА ═══════════════════════════════════════
-@router.callback_query(F.data == "master:menu")
-async def master_menu(callback: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await callback.message.edit_text(
-        texts.master_menu_text(is_maintenance()),
-        reply_markup=master_menu_kb(is_maintenance()),
-        parse_mode="HTML",
-    )
-    await callback.answer()
-
-
-@router.callback_query(F.data == "master:maintenance")
-async def toggle_maintenance(callback: CallbackQuery):
+# ═══════════════════════════════════════════════════════════
+# ГОЛОВНІ КНОПКИ МАЙСТРА (reply-клавіатура)
+# ═══════════════════════════════════════════════════════════
+@router.message(F.text == BTN["m_tech"])
+async def btn_master_tech(message: Message, state: FSMContext):
+    if not _is_authed(message):
+        return
     new_value = not is_maintenance()
     set_maintenance(new_value)
-    await callback.message.edit_text(
-        texts.master_menu_text(new_value),
-        reply_markup=master_menu_kb(new_value),
+    await message.answer(
+        ("✅ Тех. режим <b>увімкнено</b>. Клієнти бачать повідомлення про роботи."
+         if new_value else "✅ Тех. режим <b>вимкнено</b>. Бот працює у звичайному режимі."),
         parse_mode="HTML",
     )
-    await callback.answer("Тех. режим " + ("увімкнено" if new_value else "вимкнено"))
+    await _show_master_panel(message)
 
 
-# ══ ІСТОРІЯ ЗА ДЕНЬ ══════════════════════════════════════
-@router.callback_query(F.data == "master:history")
-async def history_start(callback: CallbackQuery, state: FSMContext):
+@router.message(F.text == BTN["m_client"])
+async def btn_master_to_client(message: Message, state: FSMContext):
+    # майстер переходить у режим клієнта — авторизація лишається
+    from handlers.start import show_client_menu
+    await show_client_menu(message, state)
+
+
+# ── Історія за день ──────────────────────────────────────
+@router.message(F.text == BTN["m_history"])
+async def btn_master_history(message: Message, state: FSMContext):
+    if not _is_authed(message):
+        return
     await state.set_state(MasterFlow.hist_date)
-    await callback.message.edit_text(
+    await message.answer(
         texts.MASTER_HISTORY_PICK,
         reply_markup=master_date_kb("histdate"),
         parse_mode="HTML",
     )
-    await callback.answer()
 
 
 @router.callback_query(MasterFlow.hist_date, F.data.startswith("histdate:"))
@@ -92,22 +123,22 @@ async def history_show(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     await callback.message.edit_text(
         texts.master_history(_date_ua(date_str), bookings),
-        reply_markup=back_to_master_kb(),
         parse_mode="HTML",
     )
     await callback.answer()
 
 
-# ══ МЕНЕДЖМЕНТ ВІКОН ═════════════════════════════════════
-@router.callback_query(F.data == "master:windows")
-async def wm_start(callback: CallbackQuery, state: FSMContext):
+# ── Менеджмент вікон ─────────────────────────────────────
+@router.message(F.text == BTN["m_windows"])
+async def btn_master_windows(message: Message, state: FSMContext):
+    if not _is_authed(message):
+        return
     await state.set_state(MasterFlow.wm_service)
-    await callback.message.edit_text(
+    await message.answer(
         texts.MASTER_WM_SERVICE,
         reply_markup=master_service_kb(),
         parse_mode="HTML",
     )
-    await callback.answer()
 
 
 @router.callback_query(MasterFlow.wm_service, F.data.startswith("wmsvc:"))
@@ -139,10 +170,8 @@ async def wm_pick_date(callback: CallbackQuery, state: FSMContext):
     date_str = callback.data.split(":", 1)[1]
     data = await state.get_data()
     service = data["wm_service"]
-
     blocked_map = await get_blocked_for_service(date_str, service)
     booked = await get_booked_times(date_str, service)
-
     await state.update_data(
         wm_date=date_str,
         wm_blocked=list(blocked_map.keys()),
@@ -191,36 +220,31 @@ async def wm_save(callback: CallbackQuery, state: FSMContext):
     original    = data.get("wm_original", {})
     service     = data["wm_service"]
     date_str    = data["wm_date"]
-
     await save_blocked_slots(date_str, service, new_blocked, original)
     await state.clear()
     await callback.message.edit_text(
         texts.master_wm_saved(service, _date_ua(date_str), len(new_blocked)),
-        reply_markup=back_to_master_kb(),
         parse_mode="HTML",
     )
     await callback.answer("Збережено ✅")
 
 
-# ══════════════════════════════════════════════════════════
-#  ЕТАП 3 — СКИДКОВІ ВІКНА
-# ══════════════════════════════════════════════════════════
-import anthropic
-from states import DiscountFlow, MasterAIFlow
-from keyboards import (discount_menu_kb, discount_service_kb, discount_time_kb,
-                       discount_percent_kb, discount_list_kb, master_ai_kb)
-from config import ANTHROPIC_API_KEY
-from utils.sheets import (get_available_times, add_discount,
-                          get_discounts, delete_discount)
-
-
-@router.callback_query(F.data == "master:discounts")
-async def discounts_menu(callback: CallbackQuery, state: FSMContext):
+@router.callback_query(MasterFlow.wm_editing, F.data == "wm:cancel")
+async def wm_cancel(callback: CallbackQuery, state: FSMContext):
     await state.clear()
-    await callback.message.edit_text(
+    await callback.message.edit_text("↩ Менеджмент вікон скасовано.")
+    await callback.answer()
+
+
+# ── Скидкові вікна ───────────────────────────────────────
+@router.message(F.text == BTN["m_sale"])
+async def btn_master_sale(message: Message, state: FSMContext):
+    if not _is_authed(message):
+        return
+    await state.clear()
+    await message.answer(
         texts.DISCOUNT_MENU, reply_markup=discount_menu_kb(), parse_mode="HTML"
     )
-    await callback.answer()
 
 
 @router.callback_query(F.data == "disc:add")
@@ -252,14 +276,12 @@ async def disc_date(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     service = data["disc_service"]
     available = await get_available_times(date_str, service)
-
     if not available:
         await callback.message.edit_text(
             texts.DISCOUNT_NO_SLOTS, reply_markup=master_date_kb("ddate"), parse_mode="HTML"
         )
         await callback.answer()
         return
-
     await state.update_data(disc_date=date_str)
     await state.set_state(DiscountFlow.choosing_time)
     await callback.message.edit_text(
@@ -293,7 +315,6 @@ async def disc_percent(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(
         texts.discount_saved(data["disc_service"], _date_ua(data["disc_date"]),
                              data["disc_time"], percent),
-        reply_markup=back_to_master_kb(),
         parse_mode="HTML",
     )
     await callback.answer("Знижку додано ✅")
@@ -330,31 +351,28 @@ async def disc_delete(callback: CallbackQuery, state: FSMContext):
     await callback.answer(texts.DISCOUNT_DELETED)
 
 
-# ══════════════════════════════════════════════════════════
-#  ЕТАП 3 — ІІ ПОМІЧНИК ПО БОТУ (для майстра)
-# ══════════════════════════════════════════════════════════
+# ── ШІ по боту (майстер) ─────────────────────────────────
 MASTER_AI_SYSTEM = """Ти — помічник для майстра салону краси Beauty & Shine.
-Ти пояснюєш як користуватись Telegram-ботом салону.
+Відповідаєш ВИКЛЮЧНО українською мовою — природною, професійною, без кальки з російської.
+Не перекладай дослівно — використовуй живі українські вирази.
 
 Можливості бота в панелі майстра:
-- 📋 «Історія за день» — переглянути всі записи на будь-яку дату з сумою виторгу.
-- 🗓 «Менеджмент вікон» — закрити або відкрити часові слоти. Окремо для манікюру та педикюру. Є кнопки «Закрити весь день» і «Відкрити весь день». Закриті слоти клієнт бачить як недоступні.
-- 🎁 «Скидкові вікна» — призначити знижку на конкретний вільний слот. Клієнт бачить знижку і вона застосовується автоматично при записі.
-- 🔧 «Тех. режим» — тимчасово вимкнути бота для клієнтів (вони бачитимуть повідомлення про технічні роботи).
+- 📋 «Історія за день» — переглянути всі записи на конкретну дату.
+- 🗓 «Менеджмент вікон» — закрити або відкрити часові слоти для манікюру чи педикюру. Є кнопки «Закрити весь день» / «Відкрити весь день».
+- 🎁 «Скидкові вікна» — призначити знижку на вільний слот. Клієнт бачить її та вона застосується при записі.
+- 🔧 «Тех. режим» — тимчасово вимкнути бота для клієнтів.
 
 Правила:
-- Відповідай ВИКЛЮЧНО українською мовою.
-- Коротко, по суті, дружньо. Максимум 4-5 речень.
+- Коротко, по суті, дружньо. 3-5 речень.
 - Якщо питання не стосується бота — ввічливо поясни що допомагаєш лише з ботом."""
 
 
-@router.callback_query(F.data == "master:ai")
-async def master_ai_start(callback: CallbackQuery, state: FSMContext):
+@router.message(F.text == BTN["m_ai"])
+async def btn_master_ai(message: Message, state: FSMContext):
+    if not _is_authed(message):
+        return
     await state.set_state(MasterAIFlow.asking)
-    await callback.message.edit_text(
-        texts.MASTER_AI_INTRO, reply_markup=master_ai_kb(), parse_mode="HTML"
-    )
-    await callback.answer()
+    await message.answer(texts.MASTER_AI_INTRO, parse_mode="HTML")
 
 
 @router.message(MasterAIFlow.asking)
@@ -373,7 +391,5 @@ async def master_ai_answer(message: Message, state: FSMContext):
     except Exception:
         answer = "Технічна помилка. Спробуйте ще раз трохи пізніше."
     await thinking.delete()
-    await message.answer(
-        texts.master_ai_answer(answer), reply_markup=master_ai_kb(), parse_mode="HTML"
-    )
-    # стан лишається MasterAIFlow.asking — можна питати далі
+    await message.answer(texts.master_ai_answer(answer), parse_mode="HTML")
+    # стан лишається — майстер може продовжувати питати
