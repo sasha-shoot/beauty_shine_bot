@@ -13,7 +13,7 @@ from keyboards import (
 )
 from states import ManicureFlow, PedicureFlow, AIHelperFlow, CallbackFlow
 from utils.settings import is_maintenance
-from utils.sheets import get_client_profile, get_discounts
+from utils.sheets import get_client_profile, get_discounts, get_user_by_tg_id, get_recent_orders, get_upcoming_visits
 import texts
 
 router = Router()
@@ -40,13 +40,23 @@ async def _show_maintenance(message: Message):
 
 
 async def show_client_menu(message: Message, state: FSMContext):
-    """Показує клієнтське меню з персоналізацією (для повторних клієнтів)."""
+    """Показує клієнтське меню з персоналізацією.
+    Якщо юзер зареєстрований на сайті — повна картка профілю з бонусами."""
     await state.clear()
     if is_maintenance():
         await _show_maintenance(message)
         return
-    profile = await get_client_profile(message.chat.id)
-    caption = texts.client_menu_text(profile)
+    # Пробуємо знайти юзера в таблиці «Користувачі» (сайт-реєстрація)
+    user = await get_user_by_tg_id(message.from_user.id)
+    if user:
+        # Юзер є на сайті → показуємо розширену картку з бонусами
+        profile = await get_client_profile(message.chat.id)
+        visits_count = profile["visits"] if profile else 0
+        caption = texts.profile_card_text(user, visits_count)
+    else:
+        # Юзер тільки в боті → стара логіка
+        profile = await get_client_profile(message.chat.id)
+        caption = texts.client_menu_text(profile)
     if os.path.exists(MAIN_MENU_PATH):
         await message.answer_photo(
             photo=FSInputFile(MAIN_MENU_PATH),
@@ -170,6 +180,26 @@ async def btn_sale(message: Message, state: FSMContext):
         texts.client_discounts_text(discounts),
         parse_mode="HTML",
     )
+
+
+@router.message(F.text == BTN["my_orders"])
+async def btn_my_orders(message: Message, state: FSMContext):
+    """Останні замовлення з сайту за 7 днів."""
+    if await _check_maint_or(message):
+        return
+    await state.clear()
+    orders = await get_recent_orders(message.from_user.id, days=7)
+    await message.answer(texts.orders_list_text(orders), parse_mode="HTML", disable_web_page_preview=True)
+
+
+@router.message(F.text == BTN["my_visits"])
+async def btn_my_visits(message: Message, state: FSMContext):
+    """Майбутні записи на процедури."""
+    if await _check_maint_or(message):
+        return
+    await state.clear()
+    visits = await get_upcoming_visits(message.chat.id)
+    await message.answer(texts.visits_list_text(visits), parse_mode="HTML", disable_web_page_preview=True)
 
 
 # ══ Команди (швидкий запуск з меню «/») ════════════════

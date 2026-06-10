@@ -414,3 +414,93 @@ RESCHEDULE_NOT_FOUND = (
     "Не вдалося знайти ваш запис. Будь ласка, зателефонуйте нам — "
     "ми все вирішимо 📞"
 )
+
+
+# ══ КАБІНЕТ КЛІЄНТА (синхронізація з сайтом) ══════════════════════
+
+def profile_card_text(user: dict | None, visits: int = 0) -> str:
+    """Розширена картка клієнта якщо він зареєстрований на сайті."""
+    if not user:
+        return ""
+    full_name = f"{user.get('first_name', '')} {user.get('last_name', '')}".strip()
+    parts = []
+    if full_name:
+        parts.append(f"💜 <b>Вітаємо знову, {full_name.split()[0]}!</b>")
+    else:
+        parts.append("💜 <b>Вітаємо знову!</b>")
+    parts.append("")
+    parts.append("<b>Ваш профіль:</b>")
+    if full_name:
+        parts.append(f"👤 {full_name}")
+    if user.get("username"):
+        parts.append(f"✈ @{user['username']}")
+    if user.get("phone"):
+        parts.append(f"📞 {user['phone']}")
+    parts.append(f"✦ Бонусний рахунок: <b>{user['bonus']}</b>")
+    if visits:
+        parts.append(f"📅 Візитів у студію: <b>{visits}</b>")
+    parts.append("")
+    parts.append("Оберіть дію — кнопки внизу 👇")
+    return "\n".join(parts)
+
+
+def orders_list_text(orders: list[dict]) -> str:
+    """Список останніх замовлень з сайту."""
+    if not orders:
+        return (
+            "📦 <b>Мої замовлення</b>\n\n"
+            "Поки немає замовлень за останні 7 днів.\n\n"
+            "Каталог наших засобів на сайті:\n"
+            "https://beauty-shine-site.vercel.app/catalog"
+        )
+    from data import UA_MONTHS_FULL
+    parts = [f"📦 <b>Ваші замовлення</b> <i>(за останні 7 днів)</i>", ""]
+    for o in orders[:3]:  # максимум 3 останніх
+        dt = o["dt"]
+        date_str = f"{dt.day} {UA_MONTHS_FULL[dt.month]} {dt.year}"
+        parts.append(f"<b>№ {o['order_no']}</b>")
+        parts.append(f"📅 {date_str}")
+        parts.append(f"🛍 {o['items']}")
+        if o["address"]:
+            parts.append(f"📦 Куди: {o['address']}")
+        if o["comment"]:
+            parts.append(f"💬 {o['comment']}")
+        parts.append(f"💰 <b>{o['total']} грн</b>")
+        parts.append("")
+    parts.append("Повна історія покупок — на сайті:")
+    parts.append("https://beauty-shine-site.vercel.app/")
+    return "\n".join(parts)
+
+
+def visits_list_text(visits: list[dict]) -> str:
+    """Майбутні записи на процедури."""
+    if not visits:
+        return (
+            "📅 <b>Мої записи</b>\n\n"
+            "Поки немає майбутніх записів.\n\n"
+            "Записатись на манікюр чи педикюр — кнопки внизу 👇"
+        )
+    from data import UA_MONTHS_FULL
+    parts = [f"📅 <b>Ваші майбутні записи</b>", ""]
+    nxt = visits[0]
+    try:
+        from datetime import date as _date
+        d = _date.fromisoformat(nxt["date"])
+        date_str = f"{d.day} {UA_MONTHS_FULL[d.month]}"
+    except Exception:
+        date_str = nxt["date"]
+    parts.append(f"<b>Найближчий запис</b>")
+    if nxt["service"]:
+        parts.append(f"✂️ {nxt['service']}")
+    parts.append(f"📅 {date_str}, о {nxt['time']}")
+    if nxt["master"]:
+        parts.append(f"👤 Майстер: {nxt['master']}")
+    if nxt["price"]:
+        parts.append(f"💰 {nxt['price']} грн")
+    if len(visits) > 1:
+        parts.append("")
+        parts.append(f"<i>Ще {len(visits) - 1} запис(ів) попереду</i>")
+    parts.append("")
+    parts.append("Повна історія візитів — на сайті:")
+    parts.append("https://beauty-shine-site.vercel.app/")
+    return "\n".join(parts)

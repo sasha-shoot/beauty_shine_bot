@@ -412,3 +412,115 @@ async def delete_discount(record_id: str) -> bool:
     except Exception as e:
         logger.error(f"delete_discount error: {e}")
         return False
+
+
+# ═══ КОРИСТУВАЧІ (синхронізація з сайтом) ═══════════════════
+async def get_user_by_tg_id(tg_user_id: int | str) -> dict | None:
+    """Тягне профіль користувача з таблиці «Користувачі»
+    (ця таблиця заповнюється сайтом при Telegram-авторизації)."""
+    if not tg_user_id:
+        return None
+    formula = urllib.parse.quote(f"{{tg_user_id}}='{tg_user_id}'")
+    url = _url("Користувачі", f"filterByFormula={formula}")
+    try:
+        s = await _get_session()
+        async with s.get(url, headers=_headers()) as r:
+            if r.status != 200:
+                return None
+            data = await r.json()
+            recs = data.get("records", [])
+            if not recs:
+                return None
+            f = recs[0].get("fields", {})
+            return {
+                "rec_id":    recs[0]["id"],
+                "tg_user_id": str(f.get("tg_user_id", "")),
+                "first_name": f.get("first_name", ""),
+                "last_name":  f.get("last_name", ""),
+                "username":   f.get("username", ""),
+                "phone":      f.get("phone", ""),
+                "city":       f.get("city", ""),
+                "bonus":      int(f.get("bonus") or 0),
+            }
+    except Exception as e:
+        logger.error(f"get_user_by_tg_id error: {e}")
+        return None
+
+
+# ═══ ЗАМОВЛЕННЯ (з сайту) ═══════════════════════════════════
+async def get_recent_orders(tg_user_id: int | str, days: int = 7) -> list[dict]:
+    """Замовлення користувача за останні N днів (default 7)."""
+    if not tg_user_id:
+        return []
+    formula = urllib.parse.quote(f"{{user_id}}='{tg_user_id}'")
+    url = _url("Замовлення", f"filterByFormula={formula}")
+    try:
+        s = await _get_session()
+        async with s.get(url, headers=_headers()) as r:
+            if r.status != 200:
+                return []
+            data = await r.json()
+            from datetime import datetime, timedelta
+            cutoff = datetime.now(KYIV) - timedelta(days=days)
+            result = []
+            for rec in data.get("records", []):
+                f = rec.get("fields", {})
+                date_str = f.get("date", "")
+                if not date_str:
+                    continue
+                try:
+                    dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=KYIV)
+                    if dt < cutoff:
+                        continue
+                except Exception:
+                    continue
+                result.append({
+                    "order_no": f.get("order_no", ""),
+                    "items":    f.get("items", ""),
+                    "total":    int(f.get("total") or 0),
+                    "address":  f.get("address", ""),
+                    "comment":  f.get("comment", ""),
+                    "date":     date_str,
+                    "dt":       dt,
+                })
+            result.sort(key=lambda o: o["dt"], reverse=True)
+            return result
+    except Exception as e:
+        logger.error(f"get_recent_orders error: {e}")
+        return []
+
+
+# ═══ МАЙБУТНІ ЗАПИСИ (вже існує таблиця «Записи») ════════════
+async def get_upcoming_visits(chat_id: int | str) -> list[dict]:
+    """Майбутні записи юзера (дата >= сьогодні), відсортовані по даті/часу."""
+    if not chat_id:
+        return []
+    formula = urllib.parse.quote(f"{{ChatID}}='{chat_id}'")
+    url = _url("Записи", f"filterByFormula={formula}")
+    try:
+        s = await _get_session()
+        async with s.get(url, headers=_headers()) as r:
+            if r.status != 200:
+                return []
+            data = await r.json()
+            today_iso = _date.today().isoformat()
+            result = []
+            for rec in data.get("records", []):
+                f = rec.get("fields", {})
+                dstr = f.get("Дата", "")
+                if not dstr or dstr < today_iso:
+                    continue
+                result.append({
+                    "date":     dstr,
+                    "time":     f.get("Час", ""),
+                    "service":  f.get("Послуга", ""),
+                    "master":   f.get("Майстер", ""),
+                    "price":    int(f.get("Ціна") or 0),
+                })
+            result.sort(key=lambda v: (v["date"], v["time"]))
+            return result
+    except Exception as e:
+        logger.error(f"get_upcoming_visits error: {e}")
+        return []

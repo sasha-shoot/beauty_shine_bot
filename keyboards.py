@@ -18,6 +18,8 @@ BTN = {
     "ai":         "🤖 ШІ помічник",
     "sale":       "🎁 Скидки",
     "call":       "📞 Дзвінок майстра",
+    "my_orders":  "📦 Мої замовлення",
+    "my_visits":  "📅 Мої записи",
     "home":       "🏠 На початок",
     # майстер
     "m_history":  "📋 Історія за день",
@@ -44,11 +46,13 @@ def client_reply_kb() -> ReplyKeyboardMarkup:
     b = ReplyKeyboardBuilder()
     b.button(text=BTN["manicure"])
     b.button(text=BTN["pedicure"])
+    b.button(text=BTN["my_orders"])
+    b.button(text=BTN["my_visits"])
     b.button(text=BTN["ai"])
     b.button(text=BTN["sale"])
     b.button(text=BTN["call"])
     b.button(text=BTN["home"])
-    b.adjust(2, 2, 1, 1)
+    b.adjust(2, 2, 2, 1, 1)
     return b.as_markup(resize_keyboard=True)
 
 
