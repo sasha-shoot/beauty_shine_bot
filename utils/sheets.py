@@ -417,31 +417,36 @@ async def delete_discount(record_id: str) -> bool:
 # ═══ КОРИСТУВАЧІ (синхронізація з сайтом) ═══════════════════
 async def get_user_by_tg_id(tg_user_id: int | str) -> dict | None:
     """Тягне профіль користувача з таблиці «Користувачі»
-    (ця таблиця заповнюється сайтом при Telegram-авторизації)."""
+    (ця таблиця заповнюється сайтом при Telegram-авторизації).
+    Фільтр на стороні Python — щоб працювало незалежно від типу поля в Airtable
+    (Number чи Single line text)."""
     if not tg_user_id:
         return None
-    formula = urllib.parse.quote(f"{{tg_user_id}}='{tg_user_id}'")
-    url = _url("Користувачі", f"filterByFormula={formula}")
+    target = str(tg_user_id).strip()
+    url = _url("Користувачі")
     try:
         s = await _get_session()
         async with s.get(url, headers=_headers()) as r:
             if r.status != 200:
+                logger.error(f"get_user_by_tg_id {r.status}: {await r.text()}")
                 return None
             data = await r.json()
-            recs = data.get("records", [])
-            if not recs:
-                return None
-            f = recs[0].get("fields", {})
-            return {
-                "rec_id":    recs[0]["id"],
-                "tg_user_id": str(f.get("tg_user_id", "")),
-                "first_name": f.get("first_name", ""),
-                "last_name":  f.get("last_name", ""),
-                "username":   f.get("username", ""),
-                "phone":      f.get("phone", ""),
-                "city":       f.get("city", ""),
-                "bonus":      int(f.get("bonus") or 0),
-            }
+            for rec in data.get("records", []):
+                f = rec.get("fields", {})
+                if str(f.get("tg_user_id", "")).strip() != target:
+                    continue
+                return {
+                    "rec_id":     rec["id"],
+                    "tg_user_id": str(f.get("tg_user_id", "")),
+                    "first_name": f.get("first_name", ""),
+                    "last_name":  f.get("last_name", ""),
+                    "username":   f.get("username", ""),
+                    "phone":      f.get("phone", ""),
+                    "city":       f.get("city", ""),
+                    "bonus":      int(f.get("bonus") or 0),
+                    "picture":    f.get("picture", ""),
+                }
+            return None
     except Exception as e:
         logger.error(f"get_user_by_tg_id error: {e}")
         return None
@@ -449,15 +454,17 @@ async def get_user_by_tg_id(tg_user_id: int | str) -> dict | None:
 
 # ═══ ЗАМОВЛЕННЯ (з сайту) ═══════════════════════════════════
 async def get_recent_orders(tg_user_id: int | str, days: int = 7) -> list[dict]:
-    """Замовлення користувача за останні N днів (default 7)."""
+    """Замовлення користувача за останні N днів (default 7).
+    Фільтр user_id на стороні Python — щоб працювало незалежно від типу поля в Airtable."""
     if not tg_user_id:
         return []
-    formula = urllib.parse.quote(f"{{user_id}}='{tg_user_id}'")
-    url = _url("Замовлення", f"filterByFormula={formula}")
+    target = str(tg_user_id).strip()
+    url = _url("Замовлення")
     try:
         s = await _get_session()
         async with s.get(url, headers=_headers()) as r:
             if r.status != 200:
+                logger.error(f"get_recent_orders {r.status}: {await r.text()}")
                 return []
             data = await r.json()
             from datetime import datetime, timedelta
@@ -465,7 +472,10 @@ async def get_recent_orders(tg_user_id: int | str, days: int = 7) -> list[dict]:
             result = []
             for rec in data.get("records", []):
                 f = rec.get("fields", {})
-                date_str = f.get("date", "")
+                # Фільтр по user_id — порівнюємо як рядки
+                if str(f.get("user_id", "")).strip() != target:
+                    continue
+                date_str = f.get("date", "") or rec.get("createdTime", "")
                 if not date_str:
                     continue
                 try:
