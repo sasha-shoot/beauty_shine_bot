@@ -84,16 +84,20 @@ async def _menu_caption(chat_id: int, user_id: int) -> str:
 async def show_menu_window(bot: Bot, chat_id: int, user_id: int, state: FSMContext,
                            force_new: bool = False):
     """Головне меню у вікні. force_new — надіслати новим повідомленням
-    (після термінальних карток, щоб меню було знизу)."""
+    (після термінальних карток, щоб меню було знизу).
+    Нове вікно ЗАВЖДИ йде з клієнтською reply-клавіатурою — гарантія,
+    що нижні кнопки не зникнуть після будь-якого флоу."""
     await state.clear()
     if force_new:
         await ui_state.delete_window(bot, chat_id)
         ui_state.forget_window(chat_id)
     if is_maintenance():
-        await update_window(bot, chat_id, MAINTENANCE_PATH, texts.MAINTENANCE)
+        await update_window(bot, chat_id, MAINTENANCE_PATH, texts.MAINTENANCE,
+                            reply_kb=client_reply_kb())
         return
     caption = await _menu_caption(chat_id, user_id)
-    await update_window(bot, chat_id, MAIN_MENU_PATH, caption)
+    await update_window(bot, chat_id, MAIN_MENU_PATH, caption,
+                        reply_kb=client_reply_kb())
 
 
 # Сумісність зі старими викликами з manicure.py / pedicure.py
