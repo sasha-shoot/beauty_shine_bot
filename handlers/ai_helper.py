@@ -6,6 +6,7 @@ from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 from states import AIHelperFlow
 from utils.notifications import notify_ivan_ai_alert
+from keyboards import ai_exit_kb
 from config import ANTHROPIC_API_KEY
 import texts
 
@@ -64,8 +65,8 @@ async def handle_problem(message: Message, state: FSMContext):
         answer = ("На жаль, виникла технічна помилка. "
                   "Спробуйте ще раз або скористайтесь кнопкою «Дзвінок майстра» внизу.")
     await thinking_msg.delete()
-    # Без inline-кнопок — наша reply-клавіатура внизу має все потрібне (Манікюр, Педикюр, Дзвінок, На початок)
-    await message.answer(texts.ai_response_text(answer), parse_mode="HTML")
+    # Відповідь — ТЕРМІНАЛЬНА (лишається в історії). Кнопка завершення під нею.
+    await message.answer(texts.ai_response_text(answer), parse_mode="HTML", reply_markup=ai_exit_kb())
 
     # Якщо в описі — медичні ключові слова, надсилаємо алерт Івану
     if _needs_alert(problem):

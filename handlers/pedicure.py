@@ -104,18 +104,22 @@ async def ped_confirm(callback: CallbackQuery, state: FSMContext):
     )
 
     await state.clear()
+    # Вікно стає ТЕРМІНАЛЬНОЮ карткою запису (без кнопок, лишається в історії)
     await _edit(
         callback.message,
         texts.pedicure_confirmed(data["date_ua"], data["time"], discount=discount),
-        back_to_menu_kb(),
+        None,
     )
+    from utils import ui_state
+    ui_state.forget_window(callback.message.chat.id)
     await send_location_card(callback.bot, callback.from_user.id)
-    await callback.answer()
+    from handlers.start import show_menu_new_window
+    await show_menu_new_window(callback.bot, callback.message.chat.id, callback.from_user.id, state)
+    await callback.answer("✅ Запис підтверджено!")
 
 
 @router.callback_query(PedicureFlow.confirming, F.data == "confirm:no")
 async def ped_cancel(callback: CallbackQuery, state: FSMContext):
-    await state.clear()
-    from handlers.start import show_client_menu
-    await show_client_menu(callback.message, state)
+    from handlers.start import show_menu_in_window
+    await show_menu_in_window(callback, state)
     await callback.answer("Скасовано")

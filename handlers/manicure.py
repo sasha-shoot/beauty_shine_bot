@@ -138,20 +138,25 @@ async def confirm_booking(callback: CallbackQuery, state: FSMContext):
     )
 
     await state.clear()
+    # Вікно стає ТЕРМІНАЛЬНОЮ карткою запису (без кнопок, лишається в історії)
     await _edit(
         callback.message,
         texts.booking_confirmed(data["date_ua"], data["time"],
                                 data["service_detail"], discount=discount),
-        back_to_menu_kb(),
+        None,
     )
+    from utils import ui_state
+    ui_state.forget_window(callback.message.chat.id)  # картку не видаляємо новим вікном
     await send_location_card(callback.bot, callback.from_user.id)
-    await callback.answer()
+    # Нове вікно з головним меню — знизу
+    from handlers.start import show_menu_new_window
+    await show_menu_new_window(callback.bot, callback.message.chat.id, callback.from_user.id, state)
+    await callback.answer("✅ Запис підтверджено!")
 
 
 @router.callback_query(ManicureFlow.confirming, F.data == "confirm:no")
 async def cancel_booking(callback: CallbackQuery, state: FSMContext):
-    await state.clear()
-    # надсилаємо клієнтське меню новим повідомленням
-    from handlers.start import show_client_menu
-    await show_client_menu(callback.message, state)
+    # редагуємо вікно назад у головне меню — без нових повідомлень
+    from handlers.start import show_menu_in_window
+    await show_menu_in_window(callback, state)
     await callback.answer("Скасовано")

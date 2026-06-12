@@ -1,14 +1,40 @@
-"""Дзвінок майстра. Вхід — у start.py (btn_call). Тут лише обробка телефону й питання."""
+"""Дзвінок майстра (новий UX). Вхід — start.py (menu:call редагує вікно на CALLBACK_INTRO).
+Юзер пише телефон і питання текстом (його повідомлення лишаються — це нормально),
+бот між кроками редагує ВІКНО, а не плодить нові повідомлення.
+Підтвердження — ТЕРМІНАЛЬНЕ повідомлення + нове вікно меню."""
 from aiogram import Router
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 from states import CallbackFlow
-from keyboards import back_to_menu_kb
+from keyboards import call_cancel_kb
 from utils.sheets import save_callback
 from utils.notifications import notify_ivan_callback
+from utils import ui_state
 import texts
 
 router = Router()
+
+
+async def _edit_window_text(bot, chat_id: int, text: str, kb=None) -> bool:
+    """Редагує caption вікна за збереженим id. True якщо вдалося."""
+    mid = ui_state.get_window(chat_id)
+    if not mid:
+        return False
+    try:
+        await bot.edit_message_caption(
+            chat_id=chat_id, message_id=mid,
+            caption=text, reply_markup=kb, parse_mode="HTML",
+        )
+        return True
+    except Exception:
+        try:
+            await bot.edit_message_text(
+                chat_id=chat_id, message_id=mid,
+                text=text, reply_markup=kb, parse_mode="HTML",
+            )
+            return True
+        except Exception:
+            return False
 
 
 @router.message(CallbackFlow.entering_phone)
@@ -16,7 +42,10 @@ async def get_phone(message: Message, state: FSMContext):
     phone = (message.text or "").strip()
     await state.update_data(phone=phone)
     await state.set_state(CallbackFlow.entering_question)
-    await message.answer(texts.CALLBACK_QUESTION, parse_mode="HTML")
+    # редагуємо вікно на наступний крок; якщо вікна нема — fallback нове повідомлення
+    ok = await _edit_window_text(message.bot, message.chat.id, texts.CALLBACK_QUESTION, call_cancel_kb())
+    if not ok:
+        await message.answer(texts.CALLBACK_QUESTION, parse_mode="HTML")
 
 
 @router.message(CallbackFlow.entering_question)
@@ -36,6 +65,8 @@ async def get_question(message: Message, state: FSMContext):
         phone=data.get("phone", "—"), question=question,
     )
     await state.clear()
-    await message.answer(
-        texts.CALLBACK_CONFIRMED, reply_markup=back_to_menu_kb(), parse_mode="HTML"
-    )
+    # ТЕРМІНАЛЬНЕ підтвердження (лишається в історії)
+    await message.answer(texts.CALLBACK_CONFIRMED, parse_mode="HTML")
+    # Нове вікно з меню — знизу
+    from handlers.start import show_menu_new_window
+    await show_menu_new_window(message.bot, message.chat.id, message.from_user.id, state)

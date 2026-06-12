@@ -21,6 +21,7 @@ BTN = {
     "my_orders":  "📦 Мої замовлення",
     "my_visits":  "📅 Мої записи",
     "home":       "🏠 На початок",
+    "menu":       "🏠 Меню",
     # майстер
     "m_history":  "📋 Історія за день",
     "m_windows":  "🗓 Менеджмент вікон",
@@ -301,4 +302,58 @@ def reschedule_confirm_kb(rec_id: str) -> InlineKeyboardMarkup:
     b.button(text="✅ Так, перенести", callback_data=f"rempen:{rec_id}")
     b.button(text="❌ Ні, залишити",   callback_data="rempencancel")
     b.adjust(1)
+    return b.as_markup()
+
+
+# ═══════════════════════════════════════════════════════════
+# НОВИЙ UX (edit-message): вікно з inline-навігацією
+# ═══════════════════════════════════════════════════════════
+def home_reply_kb() -> ReplyKeyboardMarkup:
+    """Єдина reply-кнопка «🏠 Меню» — страховка щоб завжди повернутись."""
+    b = ReplyKeyboardBuilder()
+    b.button(text=BTN["menu"])
+    return b.as_markup(resize_keyboard=True, is_persistent=True)
+
+
+def role_inline_kb() -> InlineKeyboardMarkup:
+    """Вибір ролі inline-кнопками у вітальному банері."""
+    b = InlineKeyboardBuilder()
+    b.button(text=BTN["client"], callback_data="role:client")
+    b.button(text=BTN["master"], callback_data="role:master")
+    b.adjust(1)
+    return b.as_markup()
+
+
+def client_menu_inline_kb() -> InlineKeyboardMarkup:
+    """Головне меню клієнта — inline у вікні."""
+    b = InlineKeyboardBuilder()
+    b.button(text=BTN["manicure"],  callback_data="menu:manicure")
+    b.button(text=BTN["pedicure"],  callback_data="menu:pedicure")
+    b.button(text=BTN["my_orders"], callback_data="menu:orders")
+    b.button(text=BTN["my_visits"], callback_data="menu:visits")
+    b.button(text=BTN["ai"],        callback_data="menu:ai")
+    b.button(text=BTN["sale"],      callback_data="menu:sale")
+    b.button(text=BTN["call"],      callback_data="menu:call")
+    b.adjust(2, 2, 2, 1)
+    return b.as_markup()
+
+
+def screen_back_kb() -> InlineKeyboardMarkup:
+    """«← Меню» для інформаційних екранів вікна."""
+    b = InlineKeyboardBuilder()
+    b.button(text="← Меню", callback_data="nav:menu")
+    return b.as_markup()
+
+
+def ai_exit_kb() -> InlineKeyboardMarkup:
+    """Кнопка завершення розмови з ШІ (під відповідями)."""
+    b = InlineKeyboardBuilder()
+    b.button(text="✅ Завершити розмову", callback_data="ai:exit")
+    return b.as_markup()
+
+
+def call_cancel_kb() -> InlineKeyboardMarkup:
+    """Скасування флоу дзвінка."""
+    b = InlineKeyboardBuilder()
+    b.button(text="✖ Скасувати", callback_data="nav:menu")
     return b.as_markup()
