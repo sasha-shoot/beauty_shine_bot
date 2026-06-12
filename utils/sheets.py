@@ -36,28 +36,55 @@ def _url(table: str, params: str = "") -> str:
 
 
 # ═══ ЗАПИСИ ══════════════════════════════════════════════
-async def get_booked_times(date_str: str, service: str | None = None) -> set:
+def _to_min(t: str) -> int:
+    """'16:30' → 990. -1 якщо невалідний."""
+    try:
+        h, m = t.strip().split(":", 1)
+        return int(h) * 60 + int(m)
+    except Exception:
+        return -1
+
+
+DEFAULT_BOOKING_MIN = 60  # тривалість запису без вказаної Тривалості
+
+
+async def get_booked_intervals(date_str: str, service: str | None = None) -> list[tuple[int, int]]:
+    """Інтервали зайнятості [(start_min, end_min)] для дати.
+    Кінець = початок + Тривалість запису (або 60 хв якщо не вказана)."""
     formula = urllib.parse.quote(f"{{Дата}}='{date_str}'")
     url = _url("Записи", f"filterByFormula={formula}")
     try:
         s = await _get_session()
         async with s.get(url, headers=_headers()) as r:
             if r.status != 200:
-                logger.error(f"get_booked_times {r.status}: {await r.text()}")
-                return set()
+                logger.error(f"get_booked_intervals {r.status}: {await r.text()}")
+                return []
             data = await r.json()
-            result = set()
+            intervals = []
             for rec in data.get("records", []):
                 f = rec.get("fields", {})
                 if "Час" not in f:
                     continue
                 if service and f.get("Послуга") != service:
                     continue
-                result.add(f["Час"])
-            return result
+                start = _to_min(f["Час"])
+                if start < 0:
+                    continue
+                try:
+                    dur = int(float(f.get("Тривалість") or 0))
+                except Exception:
+                    dur = 0
+                intervals.append((start, start + (dur if dur > 0 else DEFAULT_BOOKING_MIN)))
+            return intervals
     except Exception as e:
-        logger.error(f"get_booked_times error: {e}")
-        return set()
+        logger.error(f"get_booked_intervals error: {e}")
+        return []
+
+
+async def get_booked_times(date_str: str, service: str | None = None) -> set:
+    """Back-compat: множина зайнятих часів-початків."""
+    intervals = await get_booked_intervals(date_str, service)
+    return {f"{s // 60:02d}:{s % 60:02d}" for s, _ in intervals}
 
 
 async def get_client_profile(chat_id) -> dict | None:
@@ -156,15 +183,34 @@ async def get_blocked_for_service(date_str: str, service: str) -> dict:
         return {}
 
 
-async def get_available_times(date_str: str, service: str) -> list:
-    """Вільні слоти. Паралельні запити + приховує слоти що минули якщо це сьогодні."""
+WORK_END_MIN = 21 * 60  # кінець робочого дня — 21:00
+
+
+async def get_available_times(date_str: str, service: str, duration_min: int = 0) -> list:
+    """Вільні слоти з урахуванням ТРИВАЛОСТІ нової процедури:
+    слот доступний, якщо інтервал [слот, слот+тривалість) не перетинає
+    жоден існуючий запис і встигає до кінця робочого дня."""
     try:
-        booked, blocked = await asyncio.gather(
-            get_booked_times(date_str, service),
+        intervals, blocked = await asyncio.gather(
+            get_booked_intervals(date_str, service),
             get_blocked_for_service(date_str, service),
         )
-        unavailable = booked | set(blocked.keys())
-        avail = [t for t in TIME_SLOTS if t not in unavailable]
+        need = duration_min if duration_min > 0 else DEFAULT_BOOKING_MIN
+        blocked_starts = {_to_min(t) for t in blocked.keys()}
+
+        def _free(slot: str) -> bool:
+            start = _to_min(slot)
+            if start < 0 or start in blocked_starts:
+                return False
+            end = start + need
+            if end > WORK_END_MIN:
+                return False  # не встигаємо до закриття
+            for b_start, b_end in intervals:
+                if start < b_end and b_start < end:  # перетин інтервалів
+                    return False
+            return True
+
+        avail = [t for t in TIME_SLOTS if _free(t)]
         if date_str == _date.today().isoformat():
             now = datetime.now(KYIV)
             cur_min = now.hour * 60 + now.minute
@@ -534,3 +580,70 @@ async def get_upcoming_visits(chat_id: int | str) -> list[dict]:
     except Exception as e:
         logger.error(f"get_upcoming_visits error: {e}")
         return []
+
+
+# ═══ ЦІНИ (живий прайс із таблиці «Ціни») ═════════════════
+# Кеш 60 сек: майстер міняє цифру в Airtable — бот бачить за хвилину,
+# при цьому не смикає API на кожне натискання кнопки.
+_prices_cache: dict | None = None
+_prices_cached_at: float = 0.0
+PRICES_TTL = 60  # секунд
+
+
+async def _load_price_table() -> dict[str, dict]:
+    """Кешований прайс: {Послуга: {"price": int, "duration": int}}."""
+    global _prices_cache, _prices_cached_at
+    now = time.time()
+    if _prices_cache is not None and (now - _prices_cached_at) < PRICES_TTL:
+        return _prices_cache
+    try:
+        records = await _fetch_all("Ціни")
+        table: dict[str, dict] = {}
+        for rec in records:
+            f = rec.get("fields", {})
+            name = (f.get("Послуга") or "").strip()
+            if not name:
+                continue
+            price = f.get("Ціна")
+            duration = f.get("Тривалість")
+            table[name] = {
+                "price": int(price) if isinstance(price, (int, float)) and price > 0 else 0,
+                "duration": int(duration) if isinstance(duration, (int, float)) and duration > 0 else 0,
+            }
+        _prices_cache = table
+        _prices_cached_at = now
+        return table
+    except Exception as e:
+        logger.error(f"_load_price_table error: {e}")
+        return _prices_cache or {}
+
+
+async def get_price_list() -> dict[str, int]:
+    """{Послуга: Ціна} — для калькуляції вартості."""
+    table = await _load_price_table()
+    return {k: v["price"] for k, v in table.items() if v["price"] > 0}
+
+
+async def get_duration_map() -> dict[str, int]:
+    """{Послуга: Тривалість у хвилинах} — для блокування слотів."""
+    table = await _load_price_table()
+    return {k: v["duration"] for k, v in table.items() if v["duration"] > 0}
+
+
+def calc_manicure_price(prices: dict[str, int], type_name: str, length_name: str) -> int:
+    """Базова ціна за типом + надбавка за довжину. 0 = ціна не задана."""
+    base = prices.get(type_name, 0)
+    if not base:
+        return 0
+    extra = prices.get(f"Надбавка: {length_name}", 0)
+    return base + extra
+
+
+def calc_manicure_duration(durations: dict[str, int], type_name: str, length_name: str) -> int:
+    """Тривалість процедури в хвилинах: базова + надбавка за довжину.
+    0 = не задана (тоді блокуємо лише сам слот, як раніше)."""
+    base = durations.get(type_name, 0)
+    if not base:
+        return 0
+    extra = durations.get(f"Надбавка: {length_name}", 0)
+    return base + extra

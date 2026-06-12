@@ -105,7 +105,8 @@ def manicure_chosen_text(type_name, len_name, shape_name):
     )
 
 
-def manicure_confirm_text(type_name, len_name, shape_name, date_ua, time, discount: int = 0):
+def manicure_confirm_text(type_name, len_name, shape_name, date_ua, time,
+                          discount: int = 0, price: int = 0):
     head = "📋 <b>Підтвердіть запис:</b>"
     body = (
         f"\n\n💅 {type_name} · {len_name} · {shape_name}\n"
@@ -113,17 +114,27 @@ def manicure_confirm_text(type_name, len_name, shape_name, date_ua, time, discou
     )
     if discount:
         body += f"\n🎁 Знижка <b>−{discount}%</b>"
-    body += "\n\n<i>Вартість майстер уточнить при візиті.</i>"
+    if price > 0:
+        final = round(price * (100 - discount) / 100) if discount else price
+        body += f"\n💰 Орієнтовна вартість: <b>{final} грн</b>"
+        body += "\n\n<i>Точну вартість майстер підтвердить при візиті.</i>"
+    else:
+        body += "\n\n<i>Вартість майстер уточнить при візиті.</i>"
     return head + body
 
 
-def booking_confirmed(date_ua, time, service_detail, discount: int = 0):
+def booking_confirmed(date_ua, time, service_detail, discount: int = 0, price: int = 0):
     extra = (f"\n🎁 З вашою знижкою −{discount}%" if discount else "")
+    price_line = ""
+    if price > 0:
+        final = round(price * (100 - discount) / 100) if discount else price
+        price_line = f"\n💰 Орієнтовна вартість: <b>{final} грн</b>"
     return (
         f"✅ <b>Запис підтверджено!</b>\n\n"
         f"📅 {date_ua} о {time}\n"
         f"💅 {service_detail}"
-        f"{extra}\n\n"
+        f"{extra}"
+        f"{price_line}\n\n"
         f"Нагадаємо за 24 год та за 2 год до початку.\n"
         f"До зустрічі! 💜"
     )

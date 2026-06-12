@@ -10,7 +10,8 @@ from keyboards import (
     date_picker_kb, time_slots_kb, confirm_kb, back_to_menu_kb,
 )
 from data import MANICURE_TYPES, NAIL_LENGTHS, NAIL_SHAPES, UA_MONTHS_FULL, get_by_id
-from utils.sheets import get_available_times, save_booking, get_discount_for_slot
+from utils.sheets import (get_available_times, save_booking, get_discount_for_slot,
+                          get_duration_map, calc_manicure_duration)
 from utils.notifications import notify_irina, send_location_card
 import texts
 
@@ -75,7 +76,17 @@ async def pick_date(callback: CallbackQuery, state: FSMContext):
     date_ua = f"{d.day} {UA_MONTHS_FULL[d.month]}"
     await state.update_data(date_ua=date_ua)
 
-    available = await get_available_times(date_str, "Манікюр")
+    # Тривалість обраної процедури визначає, які слоти реально вільні
+    data_state = await state.get_data()
+    durations = await get_duration_map()
+    duration = calc_manicure_duration(
+        durations,
+        data_state.get("mtype_name", ""),
+        data_state.get("mlen_name", ""),
+    )
+    await state.update_data(duration=duration)
+
+    available = await get_available_times(date_str, "Манікюр", duration_min=duration)
     await state.set_state(ManicureFlow.choosing_time)
     if not available:
         await _edit(callback.message, texts.NO_SLOTS, date_picker_kb())
@@ -92,11 +103,17 @@ async def pick_time(callback: CallbackQuery, state: FSMContext):
 
     discount = await get_discount_for_slot(data["date"], time_str, "Манікюр")
     service_detail = f"{data['mtype_name']} · {data['mlen_name']} · {data['mshape_name']}"
-    await state.update_data(time=time_str, discount=discount, service_detail=service_detail)
+    # Жива ціна з таблиці «Ціни» (кеш 60 сек)
+    from utils.sheets import get_price_list, calc_manicure_price
+    prices = await get_price_list()
+    price = calc_manicure_price(prices, data["mtype_name"], data["mlen_name"])
+
+    await state.update_data(time=time_str, discount=discount,
+                            service_detail=service_detail, price=price)
 
     text = texts.manicure_confirm_text(
         data["mtype_name"], data["mlen_name"], data["mshape_name"],
-        data["date_ua"], time_str, discount=discount,
+        data["date_ua"], time_str, discount=discount, price=price,
     )
     await state.set_state(ManicureFlow.confirming)
     await _edit(callback.message, text, confirm_kb())
@@ -125,7 +142,10 @@ async def confirm_booking(callback: CallbackQuery, state: FSMContext):
         date=data["date"], time=data["time"],
         client_name=user.full_name, client_username=user.username or "",
         service="Манікюр", details=data["service_detail"],
-        price="", duration="", notes=note,
+        price=(str(round(data.get("price", 0) * (100 - discount) / 100))
+               if data.get("price") else ""),
+        duration=(str(data.get("duration")) if data.get("duration") else ""),
+        notes=note,
         chat_id=user.id,
     )
 
@@ -142,7 +162,8 @@ async def confirm_booking(callback: CallbackQuery, state: FSMContext):
     await _edit(
         callback.message,
         texts.booking_confirmed(data["date_ua"], data["time"],
-                                data["service_detail"], discount=discount),
+                                data["service_detail"], discount=discount,
+                                price=data.get("price", 0)),
         None,
     )
     from utils import ui_state
