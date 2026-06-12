@@ -27,16 +27,16 @@ async def ped_choose_date(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-@router.callback_query(PedicureFlow.choosing_action, F.data == "ped:call")
-async def ped_call(callback: CallbackQuery, state: FSMContext):
+@router.callback_query(PedicureFlow.choosing_action, F.data == "ped:consult")
+async def ped_consult(callback: CallbackQuery, state: FSMContext):
+    """Запис на консультацію: повний флоу — телефон → питання → заявка Івану.
+    Обробка кроків — у callback_req.py (CallbackFlow)."""
+    from states import CallbackFlow
+    from keyboards import call_cancel_kb
     await state.clear()
-    user = callback.from_user
-    await notify_ivan_callback(
-        bot=callback.bot,
-        client_name=user.full_name, client_username=user.username,
-        phone="(не вказано)", question="Консультація перед педикюром",
-    )
-    await _edit(callback.message, texts.CALLBACK_CONFIRMED, back_to_menu_kb())
+    await state.set_state(CallbackFlow.entering_phone)
+    await state.update_data(consult_context="Педикюр/подологія")
+    await _edit(callback.message, texts.CALLBACK_INTRO, call_cancel_kb())
     await callback.answer()
 
 

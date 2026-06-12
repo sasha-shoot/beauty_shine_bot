@@ -105,10 +105,11 @@ def nail_shapes_kb() -> InlineKeyboardMarkup:
 
 # ── Педикюр: одразу до дати ───────────────────────────────
 def pedicure_start_kb() -> InlineKeyboardMarkup:
-    """Після фото та опису Івана — кнопка перейти до дати або зателефонувати."""
+    """Після фото та опису Івана — запис на консультацію (без вибору дати:
+    тривалість і вартість подології індивідуальні, Іван узгоджує особисто)."""
     b = InlineKeyboardBuilder()
-    b.button(text="📞 Замовити дзвінок Івану", callback_data="ped:call")
-    b.button(text="📅 Обрати дату",            callback_data="ped:date")
+    b.button(text="📝 Записатись на консультацію", callback_data="ped:consult")
+    b.button(text="← Меню",                        callback_data="nav:menu")
     b.adjust(1)
     return b.as_markup()
 

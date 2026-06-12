@@ -55,14 +55,18 @@ async def get_question(message: Message, state: FSMContext):
     data = await state.get_data()
     user = message.from_user
 
+    # Якщо заявка прийшла з педикюр-флоу — додаємо контекст для Івана
+    ctx = data.get("consult_context", "")
+    full_question = f"[{ctx}] {question}".strip() if ctx else question
+
     await save_callback(
         client_name=user.full_name, client_username=user.username or "",
-        phone=data.get("phone", "—"), question=question,
+        phone=data.get("phone", "—"), question=full_question,
     )
     await notify_ivan_callback(
         bot=message.bot,
         client_name=user.full_name, client_username=user.username,
-        phone=data.get("phone", "—"), question=question,
+        phone=data.get("phone", "—"), question=full_question,
     )
     await state.clear()
     # ТЕРМІНАЛЬНЕ підтвердження (лишається в історії)
